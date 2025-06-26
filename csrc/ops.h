@@ -26,6 +26,11 @@
 namespace vllm_ascend {
   extern void swiglu_impl(AscendType type, void *stream, uint8_t *input, uint8_t *output, int dim, int64_t stride, int64_t out_stride, int64_t num_tokens, uint32_t aiv_num);
 
+  extern void grouped_matmul_impl(
+    AscendType type, void *stream,
+    void* x_data, void* weight_data, void* bias_data, void* output_data,
+    int64_t M, int64_t N, int64_t K, uint32_t aiv_num);
+
   extern void rotary_embedding_impl(AscendType type, bool isNeox, void *stream, int64_t *positions, void *queryDst,
     void *keyDst, void *query, void *key, void *cosSinCache, const int rotDim,
     const int64_t queryStride, const int64_t keyStride, const int64_t dstQueryStride,

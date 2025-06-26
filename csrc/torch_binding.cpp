@@ -318,6 +318,36 @@ at::Tensor _swiglu_fused(at::Tensor& x) {
     return y;
 }
 
+std::vector<at::Tensor> _npu_grouped_matmul(const std::vector<at::Tensor>& x_list, const std::vector<at::Tensor>& weight_list,
+                                          const std::vector<at::Tensor>& bias_list, const std::vector<int64_t>& group_list,
+                                          int64_t split_item, at::ScalarType output_dtype) {
+    TORCH_CHECK(x_list.size() == 1, "_npu_grouped_matmul: only single input supported in single-matmul mode");
+    TORCH_CHECK(weight_list.size() == 1, "_npu_grouped_matmul: only single weight supported in single-matmul mode");
+    at::Tensor x = x_list[0];
+    at::Tensor w = weight_list[0];
+    at::Tensor b = bias_list.empty() ? at::zeros({w.size(1)}, x.options()) : bias_list[0];
+    int64_t M = x.size(0);
+    int64_t K = x.size(1);
+    int64_t N = w.size(1);
+    at::Tensor y = at::zeros({M, N}, x.options());
+    aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
+    at_npu::native::OpCommand cmd;
+    cmd.Name("_npu_grouped_matmul");
+    cmd.SetCustomHandler([x, w, b, y, M, N, K, stream]() -> int {
+        auto dtype_num = get_dtype_from_torch(x.scalar_type());
+        fe::PlatFormInfos platform_infos;
+        int device_id = 0;
+        fe::PlatformInfoManager::GeInstance().GetRuntimePlatformInfosByDevice(device_id, platform_infos);
+        uint32_t aiv_num = platform_infos.GetCoreNumByType("aiv");
+        grouped_matmul_impl(dtype_num, stream,
+            x.data_ptr(), w.data_ptr(), b.data_ptr(), y.data_ptr(),
+            M, N, K, aiv_num);
+        return 0;
+    });
+    cmd.Run();
+    return {y};
+}
+
 at::Tensor _swiglu(at::Tensor& x) {
     TORCH_CHECK(x.dim() >= 1, "_swiglu: input must have at least 1 dimension");
     TORCH_CHECK(x.is_contiguous(), "_swiglu: input must be contiguous");
@@ -377,6 +407,9 @@ TORCH_LIBRARY_EXPAND(_C, ops)
 
     ops.def("_swiglu_fused(Tensor x) -> Tensor");
     ops.impl("_swiglu_fused", torch::kPrivateUse1, &vllm_ascend::_swiglu_fused);
+
+    ops.def("_npu_grouped_matmul(Tensor[] x, Tensor[] weight, Tensor[] bias, int[] group_list, int split_item, ScalarType output_dtype) -> Tensor[]");
+    ops.impl("_npu_grouped_matmul", torch::kPrivateUse1, &vllm_ascend::_npu_grouped_matmul);
 }
 
 REGISTER_EXTENSION(_C)
